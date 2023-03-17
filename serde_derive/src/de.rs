@@ -1693,9 +1693,11 @@ fn deserialize_untagged_enum_after(
     cattrs: &attr::Container,
     first_attempt: Option<impl FnOnce(TokenStream) -> Expr>,
 ) -> Fragment {
-    let deserializer = || quote!(
-        _serde::__private::de::ContentRefDeserializer::<__D::Error>::new(&__content)
-    );
+    let (de_impl_generics, de_ty_generics, ty_generics, where_clause) =
+        split_with_de_lifetime(params);
+    let this_type = params.this_type.to_token_stream();
+    let delife = params.borrowed.de_lifetime();
+    let deserializer = || quote!(__f());
     let attempts = variants
         .iter()
         .filter(|variant| !variant.attrs.skip_deserializing())
@@ -1719,17 +1721,32 @@ fn deserialize_untagged_enum_after(
         params.type_name()
     );
     let fallthrough_msg = cattrs.expecting().unwrap_or(&fallthrough_msg);
-
     quote_block! {
-        let __content = try!(<_serde::__private::de::Content as _serde::Deserialize>::deserialize(__deserializer));
+        struct __DeserializeRetry #de_impl_generics #where_clause {
+            marker: _serde::__private::PhantomData<#this_type #ty_generics>,
+            lifetime: _serde::__private::PhantomData<&#delife ()>,
+        }
 
-        #(
-            if let _serde::__private::Ok(__ok) = #attempts {
-                return _serde::__private::Ok(__ok);
+        impl #de_impl_generics _serde::de::DeserializeRetry<#delife> for __DeserializeRetry #de_ty_generics #where_clause {
+            type Output = #this_type #ty_generics;
+
+            fn deserialize_with_retry<__F, __D>(self, mut __f: __F) -> _serde::__private::Result<Self::Output, __D::Error>
+                where __D: _serde::Deserializer<#delife>, __F: ::core::ops::FnMut() -> __D {
+                #(
+                    if let _serde::__private::Ok(__ok) = #attempts {
+                        return _serde::__private::Ok(__ok);
+                    }
+                )*
+
+                _serde::__private::Err(_serde::de::Error::custom(#fallthrough_msg))
             }
-        )*
+        }
+        let __deserialize_retry = __DeserializeRetry {
+            marker: _serde::__private::PhantomData::<#this_type #ty_generics>,
+            lifetime: _serde::__private::PhantomData,
+        };
 
-        _serde::__private::Err(_serde::de::Error::custom(#fallthrough_msg))
+        _serde::Deserializer::deserialize_with_retry(__deserializer, __deserialize_retry)
     }
 }
 

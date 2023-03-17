@@ -794,6 +794,19 @@ where
 
 ////////////////////////////////////////////////////////////////////////////////
 
+/// A helper that can implemented as part of implementing [`Deserialize`] that
+/// accepts a function that can be called multiple times to get multiple deserializers
+/// this can be helpful if you want to retry deserialization after the first attempt fails
+pub trait DeserializeRetry<'de> {
+    /// Generally the type you are implementing deserialize for
+    type Output;
+
+    /// Attempt deserialization using f to generate deserializers as needed
+    fn deserialize_with_retry<F, D>(self, f: F) -> Result<Self::Output, D::Error>
+    where
+        D: Deserializer<'de>, F: FnMut() -> D;
+}
+
 /// A **data format** that can deserialize any data structure supported by
 /// Serde.
 ///
@@ -1218,6 +1231,20 @@ pub trait Deserializer<'de>: Sized {
     #[inline]
     fn is_human_readable(&self) -> bool {
         true
+    }
+
+    /// Deserialize using a function that may require multiple attempts
+    /// If `Self` implements `Copy` this can be as easy as
+    /// `r.deserialize_with_retry(|| self)`
+    /// Using the default implementation preserves the behaviour of types that derive
+    /// [`Deserialize`] from before this feature was introduced
+    #[inline]
+    fn deserialize_with_retry<R: DeserializeRetry<'de>>(self, r: R) -> Result<R::Output, Self::Error> {
+        let content = match ::private::de::Content::deserialize(self) {
+            Ok(val) => val,
+            Err(err) => { return Err(err); }
+        };
+        r.deserialize_with_retry(|| ::private::de::ContentRefDeserializer::new(&content))
     }
 
     // Not public API.

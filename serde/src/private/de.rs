@@ -207,10 +207,7 @@ mod content {
 
     use __private::size_hint;
     use actually_private;
-    use de::{
-        self, Deserialize, DeserializeSeed, Deserializer, EnumAccess, Expected, IgnoredAny,
-        MapAccess, SeqAccess, Unexpected, Visitor,
-    };
+    use de::{self, Deserialize, DeserializeSeed, Deserializer, EnumAccess, Expected, IgnoredAny, MapAccess, SeqAccess, Unexpected, Visitor, DeserializeRetry};
 
     /// Used from generated code to buffer the contents of the Deserializer when
     /// deserializing untagged enums and internally tagged enums.
@@ -1440,6 +1437,10 @@ mod content {
             visitor.visit_unit()
         }
 
+        fn deserialize_with_retry<R: DeserializeRetry<'de>>(self, r: R) -> Result<R::Output, Self::Error> {
+            r.deserialize_with_retry(|| ContentRefDeserializer::new(&self.content))
+        }
+
         fn __deserialize_content<V>(
             self,
             _: actually_private::T,
@@ -2161,6 +2162,10 @@ mod content {
             V: Visitor<'de>,
         {
             visitor.visit_unit()
+        }
+
+        fn deserialize_with_retry<R: DeserializeRetry<'de>>(self, r: R) -> Result<R::Output, Self::Error> {
+            r.deserialize_with_retry(|| ContentRefDeserializer::new(self.content))
         }
 
         fn __deserialize_content<V>(
